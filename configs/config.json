@@ -1,0 +1,13 @@
+{
+    "profiles_zip": [
+        "profiles/ALLOW_ALL.zip"
+    ],
+    "names": [
+        "ALLOW_ALL"
+    ],
+    "headless": false,
+    "outdir": "captures",
+    "max_Pages": 4,
+    "timeoutLoad": 30,
+    "timeoutVisit": 10
+}
