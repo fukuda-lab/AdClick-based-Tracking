@@ -1,4 +1,4 @@
-# AdClick-based-Tracking
+## AdClick-based-Tracking
 
 Crawler, data, and analysis for the paper *Clicked, Stored, Tracked: Consent Banners Fail to Control AdClick-based Tracking*.
 
@@ -16,7 +16,19 @@ Run the installation script:
 
 ---
 
-## Step 2: Install PostgreSQL
+## Step 2: Install Rust
+
+The tracking classification (Step 7 of the program) uses [adblock-rust](https://github.com/brave/adblock-rust), the filtering engine of Brave. Install Rust and Cargo with rustup:
+
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+```
+
+Follow the official guide for other systems: https://www.rust-lang.org/tools/install
+
+---
+
+## Step 3: Install PostgreSQL
 
 PostgreSQL is required for this project, please install it before you continue with the next steps.
 
@@ -27,7 +39,7 @@ After installation, make sure PostgreSQL is running and accessible on your syste
 
 ---
 
-## Step 3: Create Databases
+## Step 4: Create Databases
 
 Run the database setup script:
 
@@ -47,9 +59,9 @@ The script will:
 
 * Create 18 databases, one for each VP and consent interaction (6 VPs × 3 interactions), named `db_prefix_country_case`:
   * `country`: `AU, BR, DE, JP, US, ZA`
-  * `case`: `no_interaction`, `accept_all`, `reject_all`
-  * e.g. `adclick_DE_reject_all`
-* Create all required tables in each databases
+  * `case`: `no-interaction`, `accept-all`, `reject-all`
+  * e.g. `adclick_DE_reject-all`
+* Create all required tables in each database
 
 ---
 
@@ -62,7 +74,7 @@ Steps 1–6 run at one VP. Repeat them for each VP (`--country`): `AU, BR, DE, J
 Run the training script:
 
 ```bash
-python3 training.py --training-sites listTrain10.txt --output-name training_profile --country JP
+python3 training.py --training-sites listTrain10.txt --output-name training_profile --country DE
 ```
 
 ### Notes:
@@ -81,7 +93,7 @@ python3 training.py --training-sites listTrain10.txt --output-name training_prof
 ## Step 2: Save Logged-in Profiles (Facebook, TikTok, X)
 
 ```bash
-python3 save_AuthProfile.py --country JP
+python3 save_AuthProfile.py --country DE
 ```
 
 ### Notes:
@@ -103,7 +115,7 @@ python3 launch_crawlerAdClick.py \
   --workers 2 \
   --ssAuto \
   --round 1 \
-  --country JP
+  --country DE
 ```
 
 ### Parameters
@@ -198,7 +210,62 @@ For each AdURL, in each run:
 
 ---
 
-## Step 7: Export Data
+## Step 7: Classify Tracking Requests (EasyList / EasyPrivacy)
+
+The `tracking/` folder contains a Rust program that matches every recorded request against EasyList and EasyPrivacy with adblock-rust and stores the result in the `easylist` and `privacylist` columns of `network_requests`.
+
+```
+tracking/
+├── src/main.rs        # adblock-rust matcher
+├── Cargo.toml         # Rust dependencies (adblock)
+├── db.conf            # PostgreSQL connection (template)
+├── easylist.txt       # EasyList
+├── easyprivacy.txt    # EasyPrivacy
+└── launch.py          # runs the matcher on the 18 databases
+```
+
+### 7.1 Download the filter lists
+
+```bash
+cd tracking
+curl -o easylist.txt https://easylist.to/easylist/easylist.txt
+curl -o easyprivacy.txt https://easylist.to/easylist/easyprivacy.txt
+```
+
+The paper uses the lists retrieved on 2026-09-30. Use the copies in this folder to reproduce the results.
+
+### 7.2 Configure the database
+
+Edit `db.conf` with the host, port, username, and password used in Setup Step 4. The line `dbname=` is a placeholder: `launch.py` replaces it for each database.
+
+### 7.3 Build the matcher
+
+```bash
+cargo build --release
+```
+
+### 7.4 Run the classification
+
+```bash
+python3 launch.py
+```
+
+Enter the database name prefix (`db_prefix`) when the script asks for it. For each of the 18 databases, the script:
+
+* Writes a configuration file `db_{country}_{case}.conf` from `db.conf`, with `dbname={db_prefix}_{country}_{case}`
+* Starts `./target/release/tracking --config db_{country}_{case}.conf` in the background
+* Writes the output to `tracking_{country}_{case}.log`
+
+### Notes:
+
+* The 18 processes run in parallel, and `launch.py` returns right after it starts them. Check the log files and wait until all processes have finished before the export (Step 8), e.g. with `pgrep -f target/release/tracking`.
+* An empty prefix exits without running anything.
+* A request is a tracking request if it matches at least one rule of EasyList (`easylist = True`) or EasyPrivacy (`privacylist = True`).
+* Run this step after all visits (Step 6) and before the export (Step 8).
+
+---
+
+## Step 8: Export Data
 
 ```bash
 python3 launch_ExportData.py --out ExportData --trackerdb trackerdb_domains.csv
@@ -227,7 +294,7 @@ python3 launch_ExportData.py --out ExportData --trackerdb trackerdb_domains.csv
 jupyter notebook AdClickID_Artifact.ipynb
 ```
 
-Set `DATA_DIR` to the export folder of Step 7 and `TRACKERDB_CSV` to `trackerdb_domains.csv` in the first cell, then run all cells. The notebook reproduces the figures, tables, and numbers of the paper:
+Set `DATA_DIR` to the export folder of Step 8 and `TRACKERDB_CSV` to `trackerdb_domains.csv` in the first cell, then run all cells. The notebook reproduces the figures, tables, and numbers of the paper:
 
 * `figures/`: Figures 2–9 (PDF)
 * `tables/`: Tables 1–5 (CSV)
@@ -239,16 +306,17 @@ Set `DATA_DIR` to the export folder of Step 7 and `TRACKERDB_CSV` to `trackerdb_
 
 Full pipeline:
 
-1. Setup environment
-2. Setup database
+1. Setup environment (Python, Rust)
+2. Setup databases
 3. Train browser profile
 4. Save logged-in profiles (Facebook, TikTok, X)
 5. Collect AdURLs
 6. Resolve Yahoo! JAPAN AdURLs
 7. Filter and sample AdURLs
 8. Visit AdURLs under no interaction, reject all, and accept all
-9. Export data
-10. Analyze:
+9. Classify tracking requests with EasyList and EasyPrivacy (adblock-rust)
+10. Export data
+11. Analyze:
 
     * Consent compliance
     * Storage of the AdClick-ID
@@ -257,4 +325,4 @@ Full pipeline:
 
 ---
 
-- **dataset.zip**: contains the exported CSV data used in the study.
+- **dataset.zip***: contains the exported CSV data used in the study.
