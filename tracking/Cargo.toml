@@ -1,0 +1,17 @@
+[package]
+name = "tracking"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+adblock = "=0.12.5"
+rayon = "1.10"
+url = "2"
+anyhow = "1"
+
+tokio = { version = "1", features = ["full"] }
+
+sqlx = { version = "0.8", features = [
+    "runtime-tokio-rustls",
+    "postgres"
+] }
